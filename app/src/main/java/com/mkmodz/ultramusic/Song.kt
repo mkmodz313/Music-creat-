@@ -1,0 +1,36 @@
+package com.mkmodz.ultramusic
+
+import android.content.ContentUris
+import android.net.Uri
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+
+data class Song(
+    val id: Long,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val albumId: Long,
+    val durationMs: Long,
+    val uri: Uri,
+    val folder: String,
+    val dateAdded: Long
+) {
+    val artUri: Uri
+        get() = ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), albumId)
+
+    fun toMediaItem(): MediaItem = MediaItem.Builder()
+        .setMediaId(id.toString())
+        .setUri(uri)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .setAlbumTitle(album)
+                .setArtworkUri(artUri)
+                .build()
+        )
+        .build()
+}
+
+data class Group(val name: String, val songs: List<Song>)
