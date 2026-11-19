@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.MediaStore.Audio.Media as A
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -21,7 +22,6 @@ object TagWriter {
     fun isMp3(s: Song) = s.mime == "audio/mpeg" || s.path.endsWith(".mp3", ignoreCase = true)
 
     fun updateMediaStore(ctx: Context, orig: Song, e: Song) {
-        val A = MediaStore.Audio.Media
         val cv = ContentValues().apply {
             put(A.TITLE, e.title)
             put(A.ARTIST, e.artist)

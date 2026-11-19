@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.MediaStore.Audio.Media as A
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -12,7 +13,6 @@ object MusicRepository {
 
     /** Scans the real device music library through MediaStore. */
     suspend fun load(context: Context): List<Song> = withContext(Dispatchers.IO) {
-        val A = MediaStore.Audio.Media
         val base = listOf(
             A._ID, A.TITLE, A.ARTIST, A.ALBUM, A.ALBUM_ID, A.DURATION, A.DATA,
             A.DATE_ADDED, A.YEAR, A.TRACK, A.COMPOSER, A.MIME_TYPE
@@ -28,7 +28,6 @@ object MusicRepository {
 
     private fun query(context: Context, columns: List<String>): List<Song> {
         val out = ArrayList<Song>()
-        val A = MediaStore.Audio.Media
         val collection = if (Build.VERSION.SDK_INT >= 29)
             A.getContentUri(MediaStore.VOLUME_EXTERNAL) else A.EXTERNAL_CONTENT_URI
         val selection = "${A.IS_MUSIC} != 0 AND ${A.DURATION} >= 20000"
