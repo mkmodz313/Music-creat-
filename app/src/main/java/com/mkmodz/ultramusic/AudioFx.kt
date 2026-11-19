@@ -34,8 +34,6 @@ object AudioFx {
     var presetName by mutableStateOf("Normal")
 
     var bars by mutableStateOf(FloatArray(32))
-    var vizActive by mutableStateOf(false)
-    var vizWanted = false
 
     val presetNames = listOf("Normal", "Rock", "Pop", "Jazz", "Classical", "Dance", "Custom")
     val reverbNames = listOf("Off", "Small room", "Medium room", "Large room", "Medium hall", "Large hall", "Plate")
@@ -95,7 +93,6 @@ object AudioFx {
         try { virt = Virtualizer(0, id) } catch (ex: Exception) { virt = null }
         try { reverb = PresetReverb(0, id) } catch (ex: Exception) { reverb = null }
         applyAll()
-        if (vizWanted) startViz()
     }
 
     fun applyAll() {
@@ -165,59 +162,6 @@ object AudioFx {
         return c[i] * (1 - f) + c[i + 1] * f
     }
 
-    // ---------- live spectrum ----------
-    @Synchronized
-    fun startViz() {
-        stopViz()
-        if (sessionId == 0) return
-        try {
-            val v = Visualizer(sessionId)
-            v.enabled = false
-            v.captureSize = Visualizer.getCaptureSizeRange()[1].coerceAtMost(1024)
-            v.setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                override fun onWaveFormDataCapture(vis: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
-                override fun onFftDataCapture(vis: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                    if (fft != null) processFft(fft)
-                }
-            }, Visualizer.getMaxCaptureRate() / 2, false, true)
-            v.enabled = true
-            viz = v
-            vizActive = true
-        } catch (ex: Exception) {
-            vizActive = false
-        }
-    }
-
-    @Synchronized
-    fun stopViz() {
-        try { viz?.enabled = false; viz?.release() } catch (ex: Exception) { }
-        viz = null
-        vizActive = false
-        bars = FloatArray(32)
-    }
-
-    private fun processFft(fft: ByteArray) {
-        val n = fft.size / 2
-        val old = bars
-        val out = FloatArray(32)
-        for (b in 0 until 32) {
-            val lo = max(1, n.toDouble().pow(b / 32.0).toInt())
-            val hi = max(lo + 1, n.toDouble().pow((b + 1) / 32.0).toInt()).coerceAtMost(n)
-            var sum = 0.0
-            var cnt = 0
-            for (k in lo until hi) {
-                val re = fft[2 * k].toInt()
-                val im = fft[2 * k + 1].toInt()
-                sum += hypot(re.toDouble(), im.toDouble())
-                cnt++
-            }
-            val avg = if (cnt > 0) sum / cnt else 0.0
-            val level = (ln(1.0 + avg) / ln(1.0 + 181.0)).toFloat().coerceIn(0f, 1f)
-            out[b] = max(level, old[b] * 0.82f)
-        }
-        bars = out
-    }
-
     private fun releaseEffects() {
         try { eq?.release() } catch (ex: Exception) { }
         try { bass?.release() } catch (ex: Exception) { }
@@ -227,7 +171,6 @@ object AudioFx {
     }
 
     fun releaseAll() {
-        stopViz()
         releaseEffects()
         sessionId = 0
     }

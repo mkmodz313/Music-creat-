@@ -12,52 +12,62 @@ object MusicRepository {
 
     /** Scans the real device music library through MediaStore. */
     suspend fun load(context: Context): List<Song> = withContext(Dispatchers.IO) {
-        val out = ArrayList<Song>()
-        val collection = if (Build.VERSION.SDK_INT >= 29)
-            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-
-        val projection = arrayOf(
-            MediaStore.Audio.Media._ID,
-            MediaStore.Audio.Media.TITLE,
-            MediaStore.Audio.Media.ARTIST,
-            MediaStore.Audio.Media.ALBUM,
-            MediaStore.Audio.Media.ALBUM_ID,
-            MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.DATA,
-            MediaStore.Audio.Media.DATE_ADDED
+        val A = MediaStore.Audio.Media
+        val base = listOf(
+            A._ID, A.TITLE, A.ARTIST, A.ALBUM, A.ALBUM_ID, A.DURATION, A.DATA,
+            A.DATE_ADDED, A.YEAR, A.TRACK, A.COMPOSER, A.MIME_TYPE
         )
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= 20000"
-        val sort = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+        val list = try {
+            if (Build.VERSION.SDK_INT >= 30) query(context, base + listOf("genre", "album_artist"))
+            else query(context, base)
+        } catch (e: Exception) {
+            query(context, base)
+        }
+        list.map { MetaStore.apply(it) }
+    }
 
-        context.contentResolver.query(collection, projection, selection, null, sort)?.use { c ->
-            val iId = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val iTitle = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val iArtist = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val iAlbum = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val iAlbumId = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-            val iDur = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            val iData = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
-            val iAdded = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+    private fun query(context: Context, columns: List<String>): List<Song> {
+        val out = ArrayList<Song>()
+        val A = MediaStore.Audio.Media
+        val collection = if (Build.VERSION.SDK_INT >= 29)
+            A.getContentUri(MediaStore.VOLUME_EXTERNAL) else A.EXTERNAL_CONTENT_URI
+        val selection = "${A.IS_MUSIC} != 0 AND ${A.DURATION} >= 20000"
+        context.contentResolver.query(
+            collection, columns.toTypedArray(), selection, null, "${A.TITLE} COLLATE NOCASE ASC"
+        )?.use { c ->
+            fun idx(n: String) = c.getColumnIndex(n)
+            val iId = idx(A._ID); val iTitle = idx(A.TITLE); val iArtist = idx(A.ARTIST)
+            val iAlbum = idx(A.ALBUM); val iAlbumId = idx(A.ALBUM_ID); val iDur = idx(A.DURATION)
+            val iData = idx(A.DATA); val iAdded = idx(A.DATE_ADDED); val iYear = idx(A.YEAR)
+            val iTrack = idx(A.TRACK); val iComp = idx(A.COMPOSER); val iMime = idx(A.MIME_TYPE)
+            val iGenre = idx("genre"); val iAA = idx("album_artist")
+            fun str(i: Int): String = if (i >= 0) (c.getString(i) ?: "") else ""
             while (c.moveToNext()) {
                 val id = c.getLong(iId)
-                val path = c.getString(iData) ?: ""
-                val artist = c.getString(iArtist)?.takeIf { it != "<unknown>" } ?: "Unknown Artist"
+                val path = str(iData)
+                val artist = str(iArtist).let { if (it.isEmpty() || it == "<unknown>") "Unknown Artist" else it }
                 out.add(
                     Song(
                         id = id,
-                        title = c.getString(iTitle) ?: "Unknown",
+                        title = str(iTitle).ifEmpty { "Unknown" },
                         artist = artist,
-                        album = c.getString(iAlbum) ?: "Unknown Album",
+                        album = str(iAlbum).ifEmpty { "Unknown Album" },
                         albumId = c.getLong(iAlbumId),
                         durationMs = c.getLong(iDur),
-                        uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id),
+                        uri = ContentUris.withAppendedId(A.EXTERNAL_CONTENT_URI, id),
                         folder = File(path).parentFile?.name ?: "Unknown",
-                        dateAdded = c.getLong(iAdded)
+                        dateAdded = c.getLong(iAdded),
+                        albumArtist = str(iAA),
+                        genre = str(iGenre),
+                        year = if (iYear >= 0) c.getInt(iYear) else 0,
+                        track = if (iTrack >= 0) c.getInt(iTrack) % 1000 else 0,
+                        composer = str(iComp),
+                        mime = str(iMime),
+                        path = path
                     )
                 )
             }
         }
-        out
+        return out
     }
 }

@@ -1,8 +1,6 @@
 package com.mkmodz.ultramusic
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,7 +10,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -30,13 +27,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 
 @Composable
-fun NowPlaying(vm: MainViewModel, onEq: () -> Unit, onClose: () -> Unit) {
+fun NowPlaying(vm: MainViewModel, onEq: () -> Unit, onEdit: (Song) -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) { while (true) { vm.refreshPosition(); delay(400) } }
 
@@ -44,26 +40,14 @@ fun NowPlaying(vm: MainViewModel, onEq: () -> Unit, onClose: () -> Unit) {
     val dur = vm.durationMs.coerceAtLeast(1L)
     val value = drag ?: (vm.positionMs.toFloat() / dur).coerceIn(0f, 1f)
 
-    // rotating artwork
     var angle by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(vm.isPlaying) {
-        while (vm.isPlaying) {
-            withFrameNanos { angle = (angle + 0.2f) % 360f }
-        }
+        while (vm.isPlaying) { withFrameNanos { angle = (angle + 0.2f) % 360f } }
     }
 
-    // live spectrum (Android's Visualizer API needs the microphone permission; no audio is recorded)
-    var hasRec by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
-    }
-    val recLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { hasRec = it }
-    DisposableEffect(hasRec) {
-        AudioFx.vizWanted = hasRec
-        if (hasRec) AudioFx.startViz()
-        onDispose { AudioFx.vizWanted = false; AudioFx.stopViz() }
-    }
+    val song = vm.currentSong
+    var showLyrics by remember { mutableStateOf(false) }
 
-    // per-song background
     var songBg by remember(vm.mediaId) { mutableStateOf(Prefs.sp.getString("bg_${vm.mediaId}", null)) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -73,9 +57,10 @@ fun NowPlaying(vm: MainViewModel, onEq: () -> Unit, onClose: () -> Unit) {
         }
     }
 
-    val bgModel: String? = songBg ?: when (Look.bgMode) {
+    val artModel = vm.displayArt
+    val bgModel: Any? = songBg ?: when (Look.bgMode) {
         2 -> Look.globalBg
-        0 -> vm.artUri?.toString()
+        0 -> artModel
         else -> null
     }
     val blurIt = songBg == null && Look.bgMode == 0 && Build.VERSION.SDK_INT >= 31
@@ -98,6 +83,7 @@ fun NowPlaying(vm: MainViewModel, onEq: () -> Unit, onClose: () -> Unit) {
                 Text("NOW PLAYING", letterSpacing = 3.sp, fontSize = 12.sp, color = Look.p.c1)
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { picker.launch(arrayOf("image/*")) }) { Icon(Icons.Filled.Image, "Song background", tint = Look.p.c3) }
+                IconButton(onClick = { song?.let(onEdit) }) { Icon(Icons.Filled.Edit, "Edit tags", tint = Look.p.c3) }
                 IconButton(onClick = onEq) { Icon(Icons.Filled.Equalizer, "Equalizer", tint = Look.p.c3) }
             }
             Spacer(Modifier.height(8.dp))
@@ -109,28 +95,28 @@ fun NowPlaying(vm: MainViewModel, onEq: () -> Unit, onClose: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Icon(Icons.Filled.MusicNote, null, tint = Purple, modifier = Modifier.size(96.dp))
-                AsyncImage(model = vm.artUri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                AsyncImage(model = artModel, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             }
             Spacer(Modifier.height(20.dp))
-            Text(vm.title, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(vm.artist, color = Look.p.c3, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (songBg != null) {
-                TextButton(onClick = {
-                    Prefs.sp.edit().remove("bg_${vm.mediaId}").apply(); songBg = null
-                }) { Text("Reset this song's background", color = Pink, fontSize = 12.sp) }
-            }
-            Spacer(Modifier.height(12.dp))
-
-            if (hasRec) {
-                SpectrumView(
-                    AudioFx.bars, Look.vizStyle,
-                    Modifier.fillMaxWidth().height(90.dp).clickable { Look.vizStyle = (Look.vizStyle + 1) % 3; Look.save() }
-                )
-            } else {
-                TextButton(onClick = { recLauncher.launch(Manifest.permission.RECORD_AUDIO) }) {
-                    Text("Enable live spectrum visualizer", color = Cyan)
+            Text(vm.displayTitle, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(vm.displayArtist, color = Look.p.c3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val fav = song != null && song.id in Lib.favorites
+                IconButton(onClick = { song?.let { Lib.toggleFav(it.id) } }) {
+                    Icon(if (fav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "Favorite", tint = if (fav) Pink else Color.White)
+                }
+                IconButton(onClick = { showLyrics = true }) { Icon(Icons.Filled.Subject, "Lyrics", tint = Look.p.c1) }
+                if (songBg != null) {
+                    TextButton(onClick = { Prefs.sp.edit().remove("bg_${vm.mediaId}").apply(); songBg = null }) {
+                        Text("Reset background", color = Pink, fontSize = 12.sp)
+                    }
                 }
             }
+
+            SpectrumView(
+                { AudioFx.bars }, Look.vizStyle,
+                Modifier.fillMaxWidth().height(90.dp).clickable { Look.vizStyle = (Look.vizStyle + 1) % 3; Look.save() }
+            )
 
             Slider(
                 value = value,
@@ -165,5 +151,19 @@ fun NowPlaying(vm: MainViewModel, onEq: () -> Unit, onClose: () -> Unit) {
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showLyrics) {
+        AlertDialog(
+            onDismissRequest = { showLyrics = false },
+            title = { Text(vm.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Text(
+                    song?.lyrics?.takeIf { it.isNotBlank() } ?: "No lyrics saved for this song. Add them in Edit tags.",
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                )
+            },
+            confirmButton = { TextButton(onClick = { showLyrics = false }) { Text("Close") } }
+        )
     }
 }
